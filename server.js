@@ -10,6 +10,14 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 
+// Only allow WebSocket connections from the published site (browsers always
+// send Origin; this blocks other sites/pages from using your server).
+const ALLOWED_ORIGINS = new Set([
+  'https://phoenixperry.com',
+  'https://www.phoenixperry.com',
+  'https://phoenixperry.github.io',
+]);
+
 // room name -> { layout: {workId:{x,y}}, seeded: bool }
 const rooms = new Map();
 const getRoom = (name) => {
@@ -18,13 +26,18 @@ const getRoom = (name) => {
 };
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  // Health/status only — no wildcard CORS; only the site may read it.
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://phoenixperry.com' });
   const summary = {};
   for (const [name, r] of rooms) summary[name] = { clients: count(name), seeded: r.seeded };
   res.end(JSON.stringify({ ok: true, rooms: summary }));
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 64 * 1024, // layout JSON is tiny; cap to prevent abuse
+  verifyClient: ({ origin }) => ALLOWED_ORIGINS.has(origin),
+});
 const count = (room) => [...wss.clients].filter(c => c.readyState === 1 && c.room === room).length;
 
 function broadcast(room, obj, except) {
